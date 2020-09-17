@@ -1,0 +1,1039 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r, fig.width = 12, fig.height = 12}
+{
+library(data.table)
+library(ggplot2)
+library(Rsubread)
+library(BiocParallel)
+library(tidyverse)
+library(biomaRt)
+library(Seurat)
+library(dplyr)
+library(patchwork)
+library(iterators)
+library(itertools)
+library(future)
+library(scales)
+library(cowplot)
+library(SingleR)
+library(pheatmap)
+library(scater)
+library(Matrix.utils)
+library(edgeR)
+library(magrittr)
+library(Matrix)
+library(purrr)
+library(reshape2)
+library(S4Vectors)
+library(tibble)
+library(SingleCellExperiment)
+library(pheatmap)
+library(apeglm)
+library(png)
+library(DESeq2)
+library(RColorBrewer)
+options(future.globals.maxSize= 53687063712)
+}
+```
+
+Multiprocessing - unstable in RStudio?
+```{r, fig.width = 12, fig.height = 12}
+plan("multiprocess", workers = 30)
+```
+
+```{r, fig.width = 12, fig.height = 12}
+merged <- readRDS(file = "/data/sukalp/xcgd_data/single_cell_data/seurat_merged.rds")
+```
+
+```{r, fig.width = 12, fig.height = 12}
+merged_subset <- subset(merged, subset = (orig.ident == 'carrier_170/pbmc' | 
+                           orig.ident == 'control_1/pbmc' | 
+                           orig.ident == 'proband_181/pbmc'| 
+                           orig.ident == 'carrier_138/pbmc' | 
+                           orig.ident == 'proband_139/pbmc' |
+                           orig.ident == 'proband_147/pbmc' |
+                           orig.ident == 'carrier_148/pbmc' |
+                           orig.ident == 'carrier_149/pbmc' |
+                           orig.ident == 'carrier_150/pbmc' |
+                           orig.ident == 'carrier_160/pbmc' |
+                           orig.ident == 'carrier_161/pbmc' |
+                           orig.ident == 'proband_166/pbmc' |
+                           #orig.ident == 'carrier_170/pbmc' |
+                           orig.ident == 'proband_173/pbmc' |
+                           orig.ident == 'carrier_178/pbmc' |
+                           #orig.ident == 'proband_181/pbmc' |
+                           orig.ident == 'carrier_182/pbmc'))
+```
+
+```{r, fig.width = 12, fig.height = 12}
+merged_subset@meta.data <- merged_subset@meta.data %>%  
+                      dplyr::rename(smpl = orig.ident,
+                      nUMI = nCount_RNA,
+                      nGene = nFeature_RNA)
+```
+
+
+```{r, fig.width = 5, fig.height = 4}
+merged_subset@meta.data %>% 
+  	ggplot(aes(x=smpl, fill=smpl)) + 
+  	geom_bar(width = 0.5) +
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) + theme(legend.position = "none") + 
+   xlab("") + ylab("Number of cells") + 
+  	ggtitle("Number of cells")
+```
+  
+
+```{r, fig.width = 6, fig.height = 4}
+merged_subset@meta.data %>% 
+  	ggplot(aes(color = smpl, x = nUMI, fill = smpl, ..scaled..)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10(breaks = log_breaks(base = 10)) + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) + 
+   ggtitle("UMIs per cell") + 
+   theme(plot.title = element_text(hjust = 0.5)) +
+   ylab("")
+```
+
+```{r, fig.width = 6, fig.height = 4}
+merged_subset@meta.data %>% 
+  	ggplot(aes(color = smpl, x = nGene, fill = smpl, ..scaled..)) + 
+  	geom_density(alpha = 0.2) + 
+  	theme_classic() +
+  	scale_x_log10() +
+  	geom_vline(xintercept = 300) +
+   xlab("Number of genes") + 
+   ggtitle("Genes per cell") + 
+   theme(plot.title = element_text(hjust = 0.5)) + 
+   ylab("")
+```
+
+```{r, fig.width = 8, fig.height = 4}
+merged_subset@meta.data %>% 
+  	ggplot(aes(x = smpl, y = log(nGene), fill = smpl)) + 
+  	geom_violin() + 
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  	ggtitle("Log (n_Genes)") +
+   ylab("Log (# genes)") + 
+   xlab("")
+```
+
+```{r, fig.width = 10, fig.height = 4}
+merged_subset@meta.data %>% 
+  	ggplot(aes(x = nUMI, y = nGene, color = pMT_RNA)) + 
+  	geom_point() + 
+	scale_colour_gradient(low = "green", high = "red") +
+  	stat_smooth(method = loess) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) +
+  	geom_hline(yintercept = 250) +
+  	facet_wrap(~smpl) + 
+   ggtitle("Genes by UMIs") + 
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+
+```{r, fig.width = 6, fig.height = 4}
+merged_subset@meta.data %>% 
+  	ggplot(aes(color = smpl, x = pMT_RNA, fill = smpl, ..scaled..)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+   xlab("% mitochondrial RNA") + 
+   ylab("") + 
+  	geom_vline(xintercept = 20) +
+   ggtitle("% Mitochondrial content") + 
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+
+```{r, fig.width = 6, fig.height = 4}
+merged_subset$log10GenesPerUMI <- log10(merged_subset$nGene) / log10(merged_subset$nUMI)
+merged_subset@meta.data %>% 
+  	ggplot(aes(x = log10GenesPerUMI, color = smpl, fill = smpl, ..scaled..)) +
+  	geom_density(alpha = 0.2) +
+  	theme_classic() +
+  	geom_vline(xintercept = 0.8) +
+   xlab("Log (nGene) / Log (nUMI) - Sample complexity") + 
+   ylab("") + 
+   ggtitle("Complexity - Genes to UMIs") + 
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+Now that the visualization of key features is done - move on to actually filtering for useful cells - 
+
+```{r, fig.width = 6, fig.height = 4}
+filtered_subset <- subset(x = merged_subset, 
+                         subset= (nUMI >= 500) & 
+                           (nGene >= 250) & 
+                           (log10GenesPerUMI > 0.80) & 
+                           (pMT_RNA < 20))
+```
+
+```{r, fig.width = 5, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(x=smpl, fill=smpl)) + 
+  	geom_bar(width = 0.5) +
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) + theme(legend.position = "none") + 
+   xlab("") + ylab("Number of cells") + 
+    scale_y_continuous(name = "Number of cells", limits = c(0, 9000)) +
+  	ggtitle("Number of cells")
+```
+
+```{r, fig.width = 6, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(color = smpl, x = nUMI, fill = smpl, ..scaled..)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10(breaks = log_breaks(base = 10)) + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) + 
+   ggtitle("UMIs per cell") + 
+   theme(plot.title = element_text(hjust = 0.5)) +
+   ylab("")
+```
+
+```{r, fig.width = 6, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(color = smpl, x = nGene, fill = smpl, ..scaled..)) + 
+  	geom_density(alpha = 0.2) + 
+  	theme_classic() +
+  	scale_x_log10() +
+  	geom_vline(xintercept = 250) +
+   xlab("Number of genes") + 
+   ggtitle("Genes per cell") + 
+   theme(plot.title = element_text(hjust = 0.5)) + 
+   ylab("")
+```
+
+```{r, fig.width = 8, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(x = smpl, y = log(nGene), fill = smpl)) + 
+  	geom_violin() + 
+  	theme_classic() +
+  	theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  	theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  	ggtitle("Log NGenes") +
+   ylab("Log (# genes)") + 
+   xlab("")
+```
+
+```{r, fig.width = 10, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(x = nUMI, y = nGene, color = pMT_RNA)) + 
+  	geom_point() + 
+	scale_colour_gradient(low = "green", high = "red") +
+  	stat_smooth(method = loess) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) +
+  	geom_hline(yintercept = 250) +
+  	facet_wrap(~smpl) + 
+   ggtitle("Genes by UMIs") + 
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+```{r, fig.width = 6, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(color = smpl, x = pMT_RNA, fill = smpl, ..scaled..)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+    xlab("% mitochondrial RNA") + 
+    ylab("") + 
+  	geom_vline(xintercept = 20) +
+   ggtitle("% Mitochondrial content") + 
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+```{r, fig.width = 6, fig.height = 4}
+filtered_subset@meta.data %>% 
+  	ggplot(aes(x = log10GenesPerUMI, color = smpl, fill = smpl, ..scaled..)) +
+  	geom_density(alpha = 0.2) +
+  	theme_classic() +
+  	geom_vline(xintercept = 0.8) +
+   xlab("Log (nGene) / Log (nUMI) - Sample complexity") + 
+   ylab("") + 
+   ggtitle("Complexity - Genes to UMIs") + 
+   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+From - https://hbctraining.github.io/scRNA-seq/lessons/06_SC_SCT_and_integration.html
+```{r, fig.width = 6, fig.height = 4}
+load(file = "/data/sukalp/xcgd_data/single_cell_data/cycle.rda")
+```
+
+First, normalize data by counts for cell cycle analysis
+```{r, fig.width = 12, fig.height = 12}
+#This is prior to SCTransform - merely for the purpose of analyzing the effect of cell cycle markers on overall variation
+seurat_phase <- NormalizeData(filtered_subset)
+```
+Perform the CellCycleScoring from Seurat
+```{r, fig.width = 12, fig.height = 12}
+seurat_phase <- CellCycleScoring(seurat_phase, 
+                                 g2m.features = g2m_genes, 
+                                 s.features = s_genes)
+```
+
+Find most variable features, scale data (important to ensure no selection bias for high-expressed genes in most variable features), and then run PCA on the data
+```{r, fig.width = 12, fig.height = 12}
+seurat_phase <- FindVariableFeatures(seurat_phase, 
+                     selection.method = "vst",
+                     nfeatures = 2000, 
+                     verbose = FALSE)
+seurat_phase <- ScaleData(seurat_phase)
+seurat_phase <- RunPCA(seurat_phase)
+```
+
+Plot top PC's by cell cycle Phase
+```{r, fig.width = 10, fig.height = 6}
+DimPlot(seurat_phase,
+  reduction = "pca",
+  group.by= "Phase",
+  split.by = "Phase") +
+  xlab("PC 1") + 
+  ylab("PC 2") + 
+  ggtitle("PCA - Cell Cycle") + 
+ theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+```{r, fig.width = 12, fig.height = 12}
+seurat_phase <- RunUMAP(seurat_phase, 
+                             dims = 1:40,
+			     reduction = "pca")
+```
+
+```{r}
+seurat_phase <- RunTSNE(seurat_phase, 
+                             dims = 1:40,
+			     reduction = "pca")
+```
+
+```{r, fig.width = 10, fig.height = 6}
+DimPlot(seurat_phase, split.by = "smpl", reduction = "tsne")   
+```
+
+```{r, fig.width = 10, fig.height = 6}
+DimPlot(seurat_phase, reduction = "umap")   
+```
+
+Now, run SCTransform pipeline to regress out mitochondrial variability (and by default nUMIs) - 
+
+First, split Seurat object into list using SplitSeurat
+Why? - https://github.com/satijalab/seurat/issues/2934
+```{r, fig.width = 12, fig.height = 12}
+split_seurat <- SplitObject(filtered_subset, split.by = "smpl")
+```
+
+```{r, fig.width = 12, fig.height = 12}
+for (i in 1:length(split_seurat)) {
+    split_seurat[[i]] <- NormalizeData(split_seurat[[i]], verbose = TRUE)
+    split_seurat[[i]] <- CellCycleScoring(split_seurat[[i]], g2m.features=g2m_genes, s.features=s_genes)
+    split_seurat[[i]] <- SCTransform(split_seurat[[i]], vars.to.regress = c("pMT_RNA"))
+    }
+```
+
+```{r, fig.width = 12, fig.height = 12}
+integ_features <- SelectIntegrationFeatures(object.list = split_seurat, 
+                                            nfeatures = 3000) 
+```
+
+```{r, fig.width = 12, fig.height = 12}
+split_seurat <- PrepSCTIntegration(object.list = split_seurat, 
+                                   anchor.features = integ_features)
+```
+
+```{r, fig.width = 12, fig.height = 12}
+integ_anchors <- FindIntegrationAnchors(object.list = split_seurat, 
+                                        normalization.method = "SCT", 
+                                        anchor.features = integ_features)
+```
+
+```{r, fig.width = 12, fig.height = 12}
+seurat_integrated <- IntegrateData(anchorset = integ_anchors, 
+                                   normalization.method = "SCT")
+```
+
+```{r}
+DefaultAssay(seurat_integrated) <- "integrated"
+```
+
+```{r}
+#seurat_integrated <- ScaleData(seurat_integrated)
+```
+
+
+```{r, fig.width = 12, fig.height = 12}
+seurat_integrated <- RunPCA(object = seurat_integrated)
+seurat_integrated <- RunUMAP(seurat_integrated, 
+                             dims = 1:40)
+```
+
+```{r, fig.width = 10, fig.height = 6}
+PCAPlot(seurat_integrated,
+        split.by = "Phase")  
+```
+
+```{r, fig.width = 12, fig.height = 12}
+seurat_integrated <- RunUMAP(seurat_integrated, 
+                             dims = 1:40,
+			     reduction = "pca")
+```
+
+```{r, fig.width = 12, fig.height = 12}
+seurat_integrated <- RunTSNE(seurat_integrated, 
+                             dims = 1:40,
+			     reduction = "pca")
+```
+
+```{r, fig.width = 6, fig.height = 5}
+DimPlot(seurat_integrated, reduction = "umap")
+```
+
+```{r, fig.width = 6, fig.height = 5}
+DimPlot(seurat_integrated, reduction = "tsne")
+```
+
+```{r, fig.width = 6, fig.height = 4}
+ElbowPlot(seurat_integrated, ndims = 80)
+```
+
+```{r, fig.width = 12, fig.height = 12}
+pct <- seurat_integrated[["pca"]]@stdev / sum(seurat_integrated[["pca"]]@stdev) * 100
+cumu <- cumsum(pct)
+co1 <- which(cumu > 90 & pct < 5)[1]
+co1
+```
+```{r, fig.width = 12, fig.height = 12}
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1
+co2
+```
+
+```{r, fig.width = 6, fig.height = 4}
+pcs <- min(co1, co2)
+
+pcs
+plot_df <- data.frame(pct = pct, 
+           cumu = cumu, 
+           rank = 1:length(pct))
+
+ggplot(plot_df, aes(cumu, pct, label = rank, color = rank > pcs)) + 
+   geom_text() + 
+   geom_vline(xintercept = 90, color = "grey") + 
+   geom_hline(yintercept = min(pct[pct > 5]), color = "grey") +
+   theme_bw()
+```
+
+```{r, fig.width = 12, fig.height = 12}
+seurat_integrated <- FindNeighbors(object = seurat_integrated, 
+                                dims = 1:40)
+seurat_integrated <- FindClusters(object = seurat_integrated,
+                               resolution = c(0.2, 0.3, 0.4,0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4))
+```
+
+```{r, fig.width = 12, fig.height = 12}
+seurat_integrated@meta.data %>% 
+        View()
+```
+
+```{r, fig.width = 12, fig.height = 12}
+Idents(object = seurat_integrated) <- "integrated_snn_res.0.2"
+```
+
+```{r, fig.width = 12, fig.height = 8}
+DimPlot(seurat_integrated,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 4)
+```
+
+```{r, fig.width = 12, fig.height = 12}
+n_cells <- FetchData(seurat_integrated, 
+                     vars = c("ident", "smpl")) %>%
+        dplyr::count(ident, smpl) %>%
+        tidyr::spread(ident, n)
+
+View(n_cells)
+```
+
+```{r, fig.width = 10, fig.height = 6}
+DimPlot(seurat_integrated,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 4,
+        split.by = "smpl") + NoLegend()
+```
+
+```{r, fig.width = 15, fig.height = 10}
+DimPlot(seurat_integrated,
+        reduction = "umap",
+        label = TRUE,
+        label.size = 4,
+        split.by = "smpl", ncol = 4) + NoLegend()
+```
+
+
+```{r, fig.width = 12, fig.height = 12}
+metrics <-  c("nUMI", "nGene", "S.Score", "G2M.Score", "pMT_RNA")
+```
+
+```{r, fig.width = 8, fig.height = 8}
+FeaturePlot(seurat_integrated, 
+            reduction = "umap", 
+            features = metrics,
+            pt.size = 0.4, 
+            sort.cell = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+```
+Cluster 9 is enriched for pMT_RNA
+
+```{r, fig.width = 12, fig.height = 12}
+columns <- c(paste0("PC_", 1:16),
+            "ident",
+            "UMAP_1", "UMAP_2")
+
+pc_data <- FetchData(seurat_integrated, 
+                     vars = columns)
+```
+
+```{r, fig.width = 12, fig.height = 16}
+umap_label <- FetchData(seurat_integrated, 
+                        vars = c("ident", "UMAP_1", "UMAP_2"))  %>%
+  group_by(ident) %>%
+  summarise(x=mean(UMAP_1), y=mean(UMAP_2))
+  
+# Plotting a UMAP plot for each of the PCs
+map(paste0("PC_", 1:16), function(pc){
+        ggplot(pc_data, 
+               aes(UMAP_1, UMAP_2)) +
+                geom_point(aes_string(color=pc), 
+                           alpha = 0.7) +
+                scale_color_gradient(guide = FALSE, 
+                                     low = "grey90", 
+                                     high = "blue")  +
+                geom_text(data=umap_label, 
+                          aes(label=ident, x, y)) +
+                ggtitle(pc)
+}) %>% 
+        plot_grid(plotlist = .)
+```
+here
+```{r, fig.width = 6, fig.height = 6}
+FeaturePlot(seurat_integrated, 
+            reduction = "umap", 
+            features = c("CD34"), 
+            sort.cell = TRUE,
+            min.cutoff = 'q10', 
+            label = TRUE) 
+            #split.by = "smpl",)
+```
+
+```{r}
+seurat_integrated@assays$RNA@meta.features
+```
+
+```{r}
+saveRDS(filtered_subset, file = "/data/sukalp/xcgd_data/single_cell_data/seurat_integrated_clustered.rds")
+```
+
+```{r}
+DefaultAssay(seurat_integrated) <- "RNA"
+```
+
+```{r}
+seurat_integrated.markers <- FindAllMarkers(object = seurat_integrated, only.pos = TRUE, min.pct = 0.25, thresh.use = 0.25)
+```
+
+```{r}
+top10_comb <- seurat_integrated.markers %>%
+        group_by(cluster) %>%
+        top_n(n = 10,
+              wt = avg_logFC)
+```
+
+```{r}
+View(seurat_integrated.markers)
+```
+
+```{r}
+GetAssayData(object = seurat_integrated, slot = "counts")
+```
+
+```{r, fig.width = 8, fig.height = 6}
+annots = read.csv("/data/sukalp/xcgd_data/supporting/Ensembl_Annotations.txt")
+```
+
+```{r}
+get_conserved <- function(cluster){
+  FindConservedMarkers(seurat_integrated,
+                       ident.1 = cluster,
+                       grouping.var = "smpl",
+                       only.pos = TRUE) %>%
+    rownames_to_column(var = "gene") %>%
+    left_join(y = unique(annots[, c("gene_name", "description")]),
+               by = c("gene" = "gene_name")) %>%
+    cbind(cluster_id = cluster, .)
+  }
+```
+
+```{r}
+conserved_markers <- map_dfr(c(0:16), get_conserved)
+```
+
+```{r}
+top10 <- conserved_markers %>% 
+  mutate(avg_fc = (`proband_181/pbmc_avg_logFC` + `control_1/pbmc_avg_logFC` + `carrier_170/pbmc_avg_logFC`) /3) %>% 
+  group_by(cluster_id) %>% 
+  top_n(n = 10, 
+        wt = avg_fc)
+```
+
+```{r}
+View(top10)
+```
+
+CD45 = PTPRC
+
+Important markers - CD14, CD16 (FCGR3A), CD1C (DC), FCER1A (mast/DC), CD33 (CD1C and CD141 DC, but not pDC), CD68 (monocyte + pDC), CD34 (HSC),
+CLEC9A (CD141 DCs?), CD163 (macro), CD64 (FCGR1A - mono), CD11b (ITGAM), CD303 (CLEC4C), CD304 (NRP1)
+
+monocytes - classical CD14++, CD16-, intermediate CD14+, CD16+, non-classical CD14-, CD16++
+nk-cells - CD56 (NCAM1) (also on act. CD8+ Ts, gd-T, and DCs)
+DCs - pDC, CD1c, CD141 (3 groups)
+
+Platelets (activated/not) - GP1BA (CD42B), SELP (CD62P), CD36?
+
+Plasma cells - TNFRSF17, SLAMF7
+
+```{r, fig.width = 8, fig.height = 5}
+FeaturePlot(object = seurat_integrated, 
+           sort.cell = TRUE,
+           features = c("FOXP3"),
+           min.cutoff = 'q10', 
+           label = TRUE,
+           #reduction = "tsne",
+           repel = TRUE)
+```
+
+
+
+
+
+
+
+
+```{r}
+seurat_integrated <- StashIdent(object = seurat_integrated, save.name = 'snn_0.2_numbered')
+
+seurat_integrated <- RenameIdents(object = seurat_integrated, '0' = "CD4+ T", '1' = "CD4+ T", '2' = "CD14+ Monocytes", '3' = "CD8+ T", '4' = "NK-cells", 
+                                  '5' = "B-cells + Plasma cells", '6' = "CD8+ T", '7' = "Low UMI/Dying?", '8' = "CD8+ T", '9' = "NKT-cells?",
+                                  '10' = "FCGR3A+ Monocytes", '11' = "Erythoid/RBCs", '12' = "Megakaryo+Platelets", '13' = "DCs/FCER1A+ Mast cells?" , '14' = "pDCs", 
+                                  '15' = "NK-cells/Proliferating?", '16' = "CD34+ HSCs")
+```
+
+```{r}
+seurat_integrated@assays$RNA@counts
+```
+
+
+```{r}
+seurat_integrated <- ScaleData(object = seurat_integrated)
+```
+
+```{r, fig.width = 10, fig.height = 10}
+DoHeatmap(object = seurat_integrated, features = top10$gene, label = TRUE)
+```
+
+```{r}
+top10$gene
+```
+
+
+```{r, fig.width = 18, fig.height = 24}
+VlnPlot(object = seurat_integrated, features = c("PTPRC", #All immune
+                                                 "CD14", # CD14 Monocytes
+                                                 "FCGR3A", # FCGR3A monocytes
+                                                 "LYZ", # Myeloid?
+                                                 "TCF7", # T-cells
+                                                 "LEF1", # T-cells
+                                                 "CD68", # Monocytes + DCs
+                                                 "CD1C", # DCs (myeloid)
+                                                 "THBD", # pDC? (general DC?)
+                                                 "CD33", # DC, but not pDC
+                                                 "CD3D", # T- and T-like (NK/NK-T)
+                                                 "CD4", # CD4+ T-cells (stronger in mono/DCs??)
+                                                 "CD8A", # CD8+ T-cells
+                                                 "FOXP3", #T-reg cells
+                                                 "IL2RA", #T-reg cells (together with FOXP3/CD3D)
+                                                 "CD19", # B-cells
+                                                 "MS4A1", # B-cells
+                                                 "TNFRSF17", # Plasma cells
+                                                 "FCER1A", # Mast/DC
+                                                 "CLEC9A", # DC
+                                                 "CLEC4C", # pDC
+                                                 "GP1BA", # Megakaryo/Platelets
+                                                 "SELP", #Platelets
+                                                 "HBB", # Erythrocytes
+                                                 "NRP1", # pDCs
+                                                 "CD34", # HSCs
+                                                 "PCNA" #Proliferation
+                                                 ), pt.size = 0)
+```
+
+```{r}
+saveRDS(seurat_integrated, file = "/data/sukalp/xcgd_data/single_cell_data/all_pbmcs_clustered_labeled.rds")
+```
+
+```{r}
+seurat_integrated = readRDS(file = "/data/sukalp/xcgd_data/single_cell_data/all_pbmcs_clustered_labeled.rds")
+```
+
+```{r}
+levels(seurat_integrated)
+```
+
+https://hbctraining.github.io/scRNA-seq/lessons/pseudobulk_DESeq2_scrnaseq.html
+
+```{r}
+counts <- seurat_integrated@assays$RNA@counts
+meta.data <- seurat_integrated@meta.data
+
+```
+
+```{r}
+meta.data$clust_id <- factor(seurat_integrated@active.ident)
+```
+
+```{r}
+grp_patient <- str_extract_all(meta.data$smpl, "[A-Za-z0-9]+")
+```
+
+```{r}
+meta.data.table = data.table("smpl" = as.factor(unlist(lapply(str_split(unlist(map(str_split(meta.data$smpl, "/"), 1)), "_"), FUN = paste, collapse = ""))), 
+                                                "clust_id" = meta.data$clust_id, 
+                                                "group" = as.factor(unlist(map(grp_patient, 1))),
+                                                "patient" = as.factor(unlist(map(grp_patient, 2))))
+
+pbmc.sce <- SingleCellExperiment(assays = list(counts = counts), 
+                           colData = meta.data.table)
+```
+
+```{r}
+groups <- colData(pbmc.sce)[, c("clust_id", "smpl")]
+```
+
+```{r}
+dim(pbmc.sce)
+head(colData(pbmc.sce))
+```
+
+```{r}
+clust_ids <- purrr::set_names(levels(pbmc.sce$clust_id))
+sample_ids <- purrr::set_names(levels(pbmc.sce$smpl))
+```
+
+```{r}
+n_cells <- as.numeric(table(pbmc.sce$smpl))
+m <- match(sample_ids, pbmc.sce$smpl)
+ei <- data.frame(colData(pbmc.sce)[m, ], 
+                  n_cells, row.names = NULL) %>%
+                  dplyr::select(-"clust_id")
+```
+
+```{r}
+ei
+```
+
+```{r}
+#look more into this!!
+pbmc.sce <- perCellQCMetrics(pbmc.sce)
+```
+
+```{r}
+pb <- aggregate.Matrix(t(counts(pbmc.sce)), 
+                       groupings = groups, fun = "sum")
+class(pb)
+dim(pb)
+
+```
+
+```{r}
+pb
+```
+
+
+```{r}
+splitf <- sapply(stringr::str_split(rownames(pb), 
+                                    pattern = "_",  
+                                    n = 2), 
+                 `[`, 1)
+```
+
+```{r}
+pb <- split.data.frame(pb, 
+                       factor(splitf)) %>%
+        lapply(function(u) 
+                set_colnames(t(u), 
+                             stringr::str_extract(rownames(u), "(?<=_)[:alnum:]+")))
+
+class(pb)
+
+# Explore the different components of list
+str(pb)
+```
+
+```{r}
+table(pbmc.sce$clust_id, pbmc.sce$smpl)
+```
+
+```{r}
+get_sample_ids <- function(x){
+        pb[[x]] %>%
+                colnames()
+}
+
+de_samples <- map(1:length(clust_ids), get_sample_ids) %>%
+        unlist()
+```
+
+```{r}
+samples_list <- map(1:length(clust_ids), get_sample_ids)
+
+get_cluster_ids <- function(x){
+        rep(names(pb)[x], 
+            each = length(samples_list[[x]]))
+}
+
+de_cluster_ids <- map(1:length(clust_ids), get_cluster_ids) %>%
+        unlist()
+```
+
+```{r}
+gg_df <- data.frame(clust_id = de_cluster_ids,
+                    smpl = de_samples)
+
+gg_df <- left_join(gg_df, ei[,c("group", "smpl")]) 
+
+
+metadata <- gg_df %>%
+        dplyr::select(clust_id, smpl, group) 
+        
+metadata
+```
+
+```{r}
+clusters <- levels(meta.data$clust_id)
+clusters
+```
+
+```{r}
+cluster_metadata <- metadata[which(metadata$clust_id == clusters[3]), ]
+cluster_metadata
+
+rownames(cluster_metadata) <- cluster_metadata$smpl
+cluster_metadata
+
+counts <- pb[[clusters[3]]]
+
+cluster_counts <- data.frame(counts[, which(colnames(counts) %in% rownames(cluster_metadata))])
+
+# Check that all of the row names of the metadata are the same and in the same order as the column names of the counts in order to use as input to DESeq2
+all(rownames(cluster_metadata) == colnames(cluster_counts))
+```
+
+```{r}
+dds <- DESeqDataSetFromMatrix(cluster_counts, 
+                              colData = cluster_metadata, 
+                              design = ~ group)
+```
+
+```{r}
+rld <- rlog(dds, blind=TRUE)
+```
+
+```{r}
+DESeq2::plotPCA(rld, intgroup = "group")
+```
+
+```{r}
+rld_mat <- assay(rld)
+rld_cor <- cor(rld_mat)
+```
+
+```{r}
+pheatmap(rld_cor, annotation = cluster_metadata[, c("group"), drop=F])
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+```{r}
+plotDispEsts(dds)
+```
+
+```{r}
+levels(cluster_metadata$group)[3]
+levels(cluster_metadata$group)[1]
+```
+
+```{r}
+contrast1 <- c("group", levels(cluster_metadata$group)[3], levels(cluster_metadata$group)[1])
+```
+
+```{r}
+res <- results(dds, 
+               contrast = contrast1,
+               alpha = 0.05)
+
+res <- lfcShrink(dds, coef = "group_proband_vs_carrier", 
+                 res=res)
+```
+
+```{r}
+res_tbl <- res %>%
+        data.frame() %>%
+        rownames_to_column(var="gene") %>%
+        as_tibble()
+res_tbl
+```
+
+```{r}
+padj_cutoff <- 0.05
+
+sig_res <- dplyr::filter(res_tbl, padj < padj_cutoff) %>%
+        dplyr::arrange(padj)
+
+sig_res
+```
+
+```{r}
+normalized_counts <- counts(dds, 
+                            normalized = TRUE)
+```
+
+```{r}
+top20_sig_genes <- sig_res %>%
+        dplyr::arrange(padj) %>%
+        dplyr::pull(gene) %>%
+        head(n=20)
+
+top20_sig_norm <- data.frame(normalized_counts) %>%
+        rownames_to_column(var = "gene") %>%
+        dplyr::filter(gene %in% top20_sig_genes)
+
+gathered_top20_sig <- top20_sig_norm %>%
+        gather(colnames(top20_sig_norm)[2:length(colnames(top20_sig_norm))], key = "samplename", value = "normalized_counts")
+        
+gathered_top20_sig <- inner_join(ei[, c("smpl", "group" )], gathered_top20_sig, by = c("smpl" = "samplename"))
+```
+
+```{r}
+ggplot(gathered_top20_sig) +
+        geom_point(aes(x = gene, 
+                       y = normalized_counts, 
+                       color = group), 
+                   position=position_jitter(w=0.1,h=0)) +
+        scale_y_log10() +
+        xlab("Genes") +
+        ylab("log10 Normalized Counts") +
+        ggtitle("Top 20 Significant DE Genes") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+        theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+sig_norm <- data.frame(normalized_counts) %>%
+        rownames_to_column(var = "gene") %>%
+        dplyr::filter(gene %in% sig_res$gene)
+        
+heat_colors <- brewer.pal(6, "YlOrRd")
+
+pheatmap(sig_norm[ , 2:length(colnames(sig_norm))], 
+    color = heat_colors, 
+    cluster_rows = T, 
+    show_rownames = F,
+    annotation = cluster_metadata[, c("group", "clust_id")], 
+    border_color = NA, 
+    fontsize = 10, 
+    scale = "row", 
+    fontsize_row = 10, 
+    height = 20)    
+```
+
+```{r}
+res_table_thres <- res_tbl %>% 
+                  mutate(threshold = padj < 0.05 & abs(log2FoldChange) >= 0.58)
+```
+
+```{r}
+ggplot(res_table_thres) +
+    geom_point(aes(x = log2FoldChange, y = -log10(padj), colour = threshold)) +
+    ggtitle("Volcano plot of stimulated B cells relative to control") +
+    xlab("log2 fold change") + 
+    ylab("-log10 adjusted p-value") +
+    scale_y_continuous(limits = c(0,50)) +
+    theme(legend.position = "none",
+          plot.title = element_text(size = rel(1.5), hjust = 0.5),
+          axis.title = element_text(size = rel(1.25)))                    
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+all_ann_markers <- all_marks %>% 
+                left_join(y = unique(annots[, c("gene_name", "description")]),
+                          by = c("gene" = "gene_name"))
+```
+
+```{r}
+all_ann_markers
+```
+
+```{r}
+top_10_markers <- all_ann_markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+```
+
+```{r}
+top_10_markers <- top_10_markers[c(6, 7, 8, 1, 2, 3, 4, 5)]
+```
+
+```{r}
+cell_marker <- read.table("/data/sukalp/xcgd_data/supporting/Human_cell_markers.txt", sep = '\t' , header = TRUE)
+blood_markers <- subset(cell_marker, cell_marker$tissueType == "Peripheral Blood" | cell_marker$tissueType == "Blood" | cell_marker$tissueType == "Venous Blood" | cell_marker$tissueType == "Bone Marrow" | cell_marker$tissueType == "Serum")
+```
+
+```{r}
+seurat_integrated.sce <- as.SingleCellExperiment(seurat_integrated)
+```
+
+```{r}
+pred <- SingleR(test=seurat_integrated.sce, ref=ref, labels=ref$label.fine)
+```
+
+```{r, fig.width = 10, fig.height = 12}
+plotScoreHeatmap(pred)
+```
